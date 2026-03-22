@@ -96,9 +96,11 @@ async def run_task(oai_client, task_spec, model_name, trajectory_file):
                     "output": output_text,
                 })
 
+                new_cells = result.metadata.get('new_cells', 0)
                 print(f"  Step {step}: move {args.get('direction'):5s} -> "
                       f"pos=({env.agent_x},{env.agent_y}) "
                       f"explored={result.metadata.get('exploration_pct', 0)*100:.1f}% "
+                      f"reward={reward:+.1f} new_cells={new_cells} "
                       f"{'FINISHED' if finished else ''}")
 
                 if finished:

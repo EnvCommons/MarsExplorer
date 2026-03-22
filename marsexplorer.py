@@ -21,6 +21,10 @@ class TaskSpec(BaseModel):
     lidar_range: int
     lidar_channels: int
     difficulty: str
+    movement_cost: float
+    bonus_reward: float
+    collision_reward: float
+    out_of_bounds_reward: float
 
 
 class MoveParams(BaseModel, extra="forbid"):
@@ -39,6 +43,10 @@ DIFFICULTY_CONFIGS = {
         "max_steps": 150,
         "lidar_range": 4,
         "lidar_channels": 32,
+        "movement_cost": 0.2,
+        "bonus_reward": 400.0,
+        "collision_reward": -400.0,
+        "out_of_bounds_reward": -400.0,
     },
     "medium": {
         "grid_size": [21, 21],
@@ -47,6 +55,10 @@ DIFFICULTY_CONFIGS = {
         "max_steps": 400,
         "lidar_range": 6,
         "lidar_channels": 32,
+        "movement_cost": 0.2,
+        "bonus_reward": 400.0,
+        "collision_reward": -400.0,
+        "out_of_bounds_reward": -400.0,
     },
     "large": {
         "grid_size": [41, 41],
@@ -55,6 +67,10 @@ DIFFICULTY_CONFIGS = {
         "max_steps": 1000,
         "lidar_range": 8,
         "lidar_channels": 32,
+        "movement_cost": 0.2,
+        "bonus_reward": 400.0,
+        "collision_reward": -400.0,
+        "out_of_bounds_reward": -400.0,
     },
 }
 
@@ -85,6 +101,7 @@ class MarsExplorerEnvironment(Environment):
         self.step_count = 0
         self.game_over = False
         self.termination_reason = ""
+        self.prev_explored_count = 0
 
     async def setup(self):
         h, w = self.config.grid_size
@@ -105,6 +122,7 @@ class MarsExplorerEnvironment(Environment):
 
         self._cast_and_reveal()
 
+        self.prev_explored_count, _ = self._compute_exploration_stats()
         self.step_count = 0
         self.game_over = False
         self.termination_reason = ""
@@ -270,17 +288,18 @@ class MarsExplorerEnvironment(Environment):
             self.termination_reason = "out_of_bounds"
             explored_count, total_cells = self._compute_exploration_stats()
             pct = explored_count / total_cells if total_cells > 0 else 0.0
-            reward = pct * 0.5
+            reward = self.config.out_of_bounds_reward
 
             return ToolOutput(
                 blocks=[TextBlock(
                     text=f"MISSION FAILED: Rover moved out of bounds at ({new_x}, {new_y}).\n"
-                         f"Final exploration: {pct * 100:.1f}% | Reward: {reward:.3f}"
+                         f"Final exploration: {pct * 100:.1f}% | Reward: {reward:.1f}"
                 )],
                 metadata={
                     "termination": "out_of_bounds",
                     "exploration_pct": round(pct, 4),
                     "steps_taken": self.step_count,
+                    "reward": reward,
                 },
                 reward=reward,
                 finished=True,
@@ -292,17 +311,18 @@ class MarsExplorerEnvironment(Environment):
             self.termination_reason = "collision"
             explored_count, total_cells = self._compute_exploration_stats()
             pct = explored_count / total_cells if total_cells > 0 else 0.0
-            reward = pct * 0.5
+            reward = self.config.collision_reward
 
             return ToolOutput(
                 blocks=[TextBlock(
                     text=f"MISSION FAILED: Rover collided with obstacle at ({new_x}, {new_y}).\n"
-                         f"Final exploration: {pct * 100:.1f}% | Reward: {reward:.3f}"
+                         f"Final exploration: {pct * 100:.1f}% | Reward: {reward:.1f}"
                 )],
                 metadata={
                     "termination": "collision",
                     "exploration_pct": round(pct, 4),
                     "steps_taken": self.step_count,
+                    "reward": reward,
                 },
                 reward=reward,
                 finished=True,
@@ -316,22 +336,32 @@ class MarsExplorerEnvironment(Environment):
 
         explored_count, total_cells = self._compute_exploration_stats()
         pct = explored_count / total_cells if total_cells > 0 else 0.0
+        new_cells = explored_count - self.prev_explored_count
+        self.prev_explored_count = explored_count
+
+        # Per-step reward: new explored cells minus movement cost
+        step_reward = new_cells - self.config.movement_cost
 
         # 95% explored -> success
         if pct >= 0.95:
             self.game_over = True
             self.termination_reason = "exploration_complete"
+            reward = self.config.bonus_reward
             obs = self._format_observation()
             return ToolOutput(
                 blocks=[TextBlock(
-                    text=f"MISSION SUCCESS: {pct * 100:.1f}% of terrain explored!\n\n{obs}"
+                    text=f"MISSION SUCCESS: {pct * 100:.1f}% of terrain explored!\n"
+                         f"Bonus reward: {reward:.1f}\n\n{obs}"
                 )],
                 metadata={
                     "termination": "exploration_complete",
                     "exploration_pct": round(pct, 4),
                     "steps_taken": self.step_count,
+                    "new_cells": new_cells,
+                    "step_reward": step_reward,
+                    "reward": reward,
                 },
-                reward=pct,
+                reward=reward,
                 finished=True,
             )
 
@@ -343,18 +373,21 @@ class MarsExplorerEnvironment(Environment):
             return ToolOutput(
                 blocks=[TextBlock(
                     text=f"MISSION COMPLETE: Step limit reached.\n"
-                         f"Final exploration: {pct * 100:.1f}%\n\n{obs}"
+                         f"Final exploration: {pct * 100:.1f}% | Step reward: {step_reward:.1f}\n\n{obs}"
                 )],
                 metadata={
                     "termination": "max_steps",
                     "exploration_pct": round(pct, 4),
                     "steps_taken": self.step_count,
+                    "new_cells": new_cells,
+                    "step_reward": step_reward,
+                    "reward": step_reward,
                 },
-                reward=pct,
+                reward=step_reward,
                 finished=True,
             )
 
-        # Normal step
+        # Normal step -- dense reward
         obs = self._format_observation()
         return ToolOutput(
             blocks=[TextBlock(text=obs)],
@@ -362,8 +395,10 @@ class MarsExplorerEnvironment(Environment):
                 "exploration_pct": round(pct, 4),
                 "position": [self.agent_x, self.agent_y],
                 "step": self.step_count,
+                "new_cells": new_cells,
+                "step_reward": step_reward,
             },
-            reward=0.0,
+            reward=step_reward,
             finished=False,
         )
 
@@ -436,6 +471,10 @@ class MarsExplorerEnvironment(Environment):
                     "lidar_range": config["lidar_range"],
                     "lidar_channels": config["lidar_channels"],
                     "difficulty": difficulty,
+                    "movement_cost": config["movement_cost"],
+                    "bonus_reward": config["bonus_reward"],
+                    "collision_reward": config["collision_reward"],
+                    "out_of_bounds_reward": config["out_of_bounds_reward"],
                 })
 
         return tasks

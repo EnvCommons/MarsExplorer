@@ -23,6 +23,10 @@ def make_env(seed=0, difficulty="small", **overrides):
         "lidar_range": config["lidar_range"],
         "lidar_channels": config["lidar_channels"],
         "difficulty": difficulty,
+        "movement_cost": config["movement_cost"],
+        "bonus_reward": config["bonus_reward"],
+        "collision_reward": config["collision_reward"],
+        "out_of_bounds_reward": config["out_of_bounds_reward"],
     }
     return MarsExplorerEnvironment(task_spec)
 
@@ -122,6 +126,9 @@ async def test_valid_move_right():
     assert env.agent_x == 1
     assert env.agent_y == 0
     assert env.step_count == 1
+    # Dense reward: new cells - movement cost
+    assert result.metadata["new_cells"] >= 0
+    assert result.reward == result.metadata["new_cells"] - 0.2
 
 
 @pytest.mark.asyncio
@@ -142,7 +149,7 @@ async def test_out_of_bounds_left():
     result = await env.move(MoveParams(direction="left"))
     assert result.finished
     assert result.metadata["termination"] == "out_of_bounds"
-    assert result.reward >= 0.0
+    assert result.reward == -400.0
 
 
 @pytest.mark.asyncio
@@ -196,7 +203,7 @@ async def test_collision_detection():
     result = await env.move(MoveParams(direction="right"))
     assert result.finished
     assert result.metadata["termination"] == "collision"
-    assert result.reward >= 0.0
+    assert result.reward == -400.0
 
 
 @pytest.mark.asyncio
@@ -254,17 +261,36 @@ async def test_all_difficulties_produce_valid_maps():
 
 
 @pytest.mark.asyncio
-async def test_reward_on_oob_is_halved():
+async def test_dense_step_reward():
+    """Each step reward = new_explored_cells - movement_cost."""
     env = await setup_env(seed=0, difficulty="small")
     from marsexplorer import MoveParams
 
-    explored_before, total = env._compute_exploration_stats()
-    pct_before = explored_before / total
+    prev_explored = env.prev_explored_count
 
+    result = await env.move(MoveParams(direction="right"))
+    assert not result.finished
+
+    new_explored, _ = env._compute_exploration_stats()
+    new_cells = new_explored - prev_explored
+    expected_reward = new_cells - env.config.movement_cost
+    assert result.reward == expected_reward
+    assert result.metadata["new_cells"] == new_cells
+    assert result.metadata["step_reward"] == expected_reward
+
+
+@pytest.mark.asyncio
+async def test_step_reward_when_no_new_cells():
+    """Moving to an already-explored area gives reward = -movement_cost."""
+    env = await setup_env(seed=0, difficulty="small")
+    from marsexplorer import MoveParams
+
+    # Move right then left -- the left move reveals no new cells
+    await env.move(MoveParams(direction="right"))
     result = await env.move(MoveParams(direction="left"))
-    assert result.finished
-    expected_reward = pct_before * 0.5
-    assert abs(result.reward - expected_reward) < 0.01
+    assert not result.finished
+    # Should be -0.2 (no new cells, only movement cost)
+    assert result.reward == -env.config.movement_cost
 
 
 if __name__ == "__main__":

@@ -33,14 +33,17 @@ Each task uses a fixed seed for reproducible map generation. The agent starts at
 
 ## Reward Structure
 
-This is a sparse, verifiable reward environment. The reward is emitted once when the episode ends:
+This is a dense, verifiable reward environment matching the original MarsExplorer reward structure. No LLM graders are used.
 
-- **95%+ explored (success)**: reward = exploration percentage (e.g., 0.97)
-- **Max steps reached**: reward = exploration percentage achieved
-- **Collision with obstacle**: reward = exploration percentage * 0.5 (penalty)
-- **Out of bounds**: reward = exploration percentage * 0.5 (penalty)
+**Per-step reward** (every move):
+- `new_explored_cells - movement_cost` (movement_cost = 0.2)
+- Exploring new terrain yields positive reward; revisiting explored areas costs 0.2
 
-Intermediate steps return reward = 0.0. No LLM graders are used.
+**Terminal rewards:**
+- **95%+ explored (success)**: +400 bonus
+- **Collision with obstacle**: -400 penalty, episode ends
+- **Out of bounds**: -400 penalty, episode ends
+- **Max steps reached**: episode ends with final step reward
 
 ## Tools
 
