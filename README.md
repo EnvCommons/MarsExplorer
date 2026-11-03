@@ -19,11 +19,11 @@ MarsExplorer does not require a sandbox. All game logic runs in-process with min
 
 ## License
 
-[ORLv1](https://openreward.ai/orlv1.md).
+[MIT](https://opensource.org/licenses/MIT).
 
 ## Tasks
 
-There are 1,000 training tasks across three difficulty tiers:
+There are 1,000 tasks in the `train` split, across three difficulty tiers:
 
 - **Small** (334 tasks): 11x11 grid, 5 obstacles, 150 max steps, LIDAR range 4
 - **Medium** (333 tasks): 21x21 grid, 12 obstacles, 400 max steps, LIDAR range 6
@@ -40,10 +40,14 @@ This is a dense, verifiable reward environment matching the original MarsExplore
 - Exploring new terrain yields positive reward; revisiting explored areas costs 0.2
 
 **Terminal rewards:**
-- **95%+ explored (success)**: +400 bonus
-- **Collision with obstacle**: -400 penalty, episode ends
-- **Out of bounds**: -400 penalty, episode ends
+- **95%+ explored (success)**: the final move's reward is the +400 bonus (in place of the step reward), episode ends
+- **Collision with obstacle**: -400 (in place of the step reward), episode ends
+- **Out of bounds**: -400 (in place of the step reward), episode ends
 - **Max steps reached**: episode ends with final step reward
+
+## Data
+
+No external data is used. Maps are generated procedurally from each task's seed.
 
 ## Tools
 
@@ -67,9 +71,13 @@ Step: 15/400 | Position: (5, 3) | Explored: 34.2% (151/441)
 Legend: @ = rover, # = obstacle, . = explored, ? = unexplored
 ```
 
+## Time Horizon
+
+MarsExplorer is a multi-turn environment with one `move` call per step, up to 150, 400 or 1,000 moves depending on the tier.
+
 ## Other Environment Requirements
 
-There are no further environment requirements. MarsExplorer works out of the box with the OpenReward endpoint without any secrets.
+There are no further environment requirements. MarsExplorer needs no secrets.
 
 ## Safety
 
